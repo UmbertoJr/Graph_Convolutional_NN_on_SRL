@@ -24,6 +24,9 @@ class read_file:
             m = 0
             line = f.readline()
             while len(docs) < num_sent:
+                if line == "":
+                        f.seek(0)
+                        line = f.readline()
                 word = line.split("\t")
                 if word[0] != "\n":
                       if  int(word[0]) > m:
@@ -35,11 +38,11 @@ class read_file:
                     m = 0
                     docs.append(sentence)
                     sentence = []
+                    self.position_file_byte = f.tell()
                     line = f.readline()
-                    if line == "":
-                        f.seek(0)
-                        line = f.readline()
-            self.position_file_byte = f.tell()
+                    
+                    
+            
     
         return docs
     
@@ -281,7 +284,7 @@ class model_builder:
         ### tramite una chiamata ritorna l'embeddings della parola cercata
         with open(self.name_file, "r") as f:
             f.seek(self.model[word])
-            return np.array(f.readline().split()[1:])
+            return np.array(f.readline().split()[1:], dtype=np.float)
         
    
     def create_we_for(self, sent):
@@ -326,35 +329,20 @@ class model_builder:
         ARG_POS = []
         
         for sent in sents:
-            
-            if len(sent) > self.max_length:
-                sents_after_split = self.split_the_sentence(sent)
-                
-                for s in sents_after_split:
-                    pred_ind, pred_count = self.position_predicate_indices(s)
-                    for pred_num in range(pred_count):
-                        x, n = self.create_we_for(s)
-                        pos, lem = self.pos_lemma_one_hot(s)
-                        arg_pos = self.position_argument_vec(pred_num, s)
-                        l_i, l_v, s_i, s_v = self.laplacian_and_S(s)
-                        X.append(x), seq_len.append(n), POS.append(pos), LEMMA.append(lem)
-                        Lapl_ind.append(l_i), Lapl_val.append(l_v), S_ind.append(s_i), S_val.append(s_v)
-                        ARG_POS.append(arg_pos)
-                    PRED_IND.extend(pred_ind)
-
-            else:
-                pred_ind, pred_count = self.position_predicate_indices(sent)
+            sent = self.change_indices(sent)
+            pred_ind, pred_count = self.position_predicate_indices(sent)
+            if pred_count > 0:
                 for pred_num in range(pred_count):
                     x, n = self.create_we_for(sent)
                     pos, lem = self.pos_lemma_one_hot(sent)
                     arg_pos = self.position_argument_vec(pred_num, sent)
                     l_i, l_v, s_i, s_v = self.laplacian_and_S(sent)
-                    
+
                     X.append(x), seq_len.append(n), POS.append(pos), LEMMA.append(lem)
                     Lapl_ind.append(l_i), Lapl_val.append(l_v), S_ind.append(s_i), S_val.append(s_v)
                     ARG_POS.append(arg_pos)
                 PRED_IND.extend(pred_ind)
-        
+
         return np.array(X), np.array(POS), np.array(LEMMA), np.array(Lapl_ind), np.array(Lapl_val), np.array(S_ind), np.array(S_val), np.array(PRED_IND), np.array(ARG_POS), np.array(seq_len)
     
     
@@ -376,49 +364,36 @@ class model_builder:
         PRED_IND, PRED_count = [], []
         
         for sent in sents:
-            if len(sent) > self.max_length:
-                sents_after_split = self.split_the_sentence(sent)
-
-                for s in sents_after_split:
-                    pred_ind, pred_count = self.position_predicate_indices(s)
-                    for pred_num in range(pred_count):
-                        x, n = self.create_we_for(s)
-                        pos, lem = self.pos_lemma_one_hot(s)
-                        l_i, l_v, s_i, s_v = self.laplacian_and_S(s)
-                        X.append(x), seq_len.append(n),POS.append(pos), LEMMA.append(lem)
-                        Lapl_ind.append(l_i), Lapl_val.append(l_v), S_ind.append(s_i), S_val.append(s_v)
-                    
-                    PRED_IND.extend(pred_ind)
-
-            else:
-                pred_ind, pred_count = self.position_predicate_indices(sent)
+            sent = self.change_indices(sent)
+            pred_ind, pred_count = self.position_predicate_indices(sent)
+            if pred_count > 0:
                 for pred_num in range(pred_count):
                     x, n = self.create_we_for(sent)
                     pos, lem = self.pos_lemma_one_hot(sent)
                     l_i, l_v, s_i, s_v = self.laplacian_and_S(sent)
                     X.append(x), seq_len.append(n), POS.append(pos), LEMMA.append(lem)
                     Lapl_ind.append(l_i), Lapl_val.append(l_v), S_ind.append(s_i), S_val.append(s_v)
-                
+
                 PRED_IND.extend(pred_ind)
 
         return np.array(X), np.array(POS), np.array(LEMMA), np.array(Lapl_ind), np.array(Lapl_val), np.array(S_ind), np.array(S_val), np.array(PRED_IND), np.array(seq_len)
     
     
-    def change_indices(self, sent):
+    def change_indices(self, sent_c):
         #### this function just change the indices of inputs
-        first_index = int(sent[0][0])
+        first_index = int(sent_c[0][0])
         new_sent = []
-        for w in sent:
-            new_w = []
-            for i in w:
-                new_w.append(i)
-            new_w[0] = str( int(w[0]) - first_index )
-            if new_w[8].isdigit():
-                head = int(new_w[8]) - first_index 
-                if head >= 0 and head < self.max_length:
-                    new_w[8] = str(head)
-                else:
-                    new_w[8] = "_"
+        for w in sent_c:
+            new_w = w.copy()
+            to = str( int(w[0]) - first_index )
+            new_w[0] = to
+            head = int(new_w[8]) - first_index 
+            if head >= 0 and head < self.max_length:
+                new_w[8] = str(head)
+            else:
+                new_w[8] = ""
+                
+
             new_sent.append(new_w)
         return new_sent
     
@@ -427,20 +402,12 @@ class model_builder:
         ind_pred_med, n = 0, len(sent)
         distance = n
         max_len = self.max_length
-        one = sent[:max_len]
+        one = self.change_indices(sent[:max_len])
         three = self.change_indices(sent[(n - max_len):])
-        if n - max_len <= 20:
+        if n - max_len <= 50:
             return [one, three]
         else:
-            for w in sent:
-                if w[2]=="," or w[2]=="." or w[2]==";" or w[2]=="!" or w[2]=="?":
-                    ind = int(w[0])-1
-                    if ind < 40:
-                        if abs(ind - n//5) < distance:
-                            ind_pred_med = ind
-                            distance = abs(ind - n//5)
-
-            two = self.change_indices(sent[ind_pred_med : ind_pred_med+ max_len])
+            two = self.change_indices(sent[50 : 50 + max_len])
 
             return [one, two, three]
 
@@ -506,39 +473,40 @@ class model_builder:
         S = {}
         for w in sent:
             if w[8].isdigit():
-                i = int(w[8])-1
+                i = int(w[8])
+                
             else:
                 continue
-            j = int(w[0])-1
+            j = int(w[0])
+            
             if w[10] in self.dep_rel_pos:
                 lab = int(self.dep_rel_pos[w[10]])
             else:
-                lab = int(self.dep_rel_pos["unk"])
-            if i + 1 != 0:  # do not take root
-                if i in L:
-                    L[i].append(j)
-                else:
-                    L[i] = [j]     
+                lab = 0
+            if i in L:
+                L[i].append(j)
+            else:
+                L[i] = [j]     
 
-                if i in S:
-                    if lab in S[i]:
-                        S[i][lab] += 1
+            if i in S:
+                if lab in S[i]:
+                    S[i][lab] += 1
 
-                    else : 
-                        S[i][lab] = 1
+                else : 
+                    S[i][lab] = 1
 
-                else:
-                    S[i] = {lab : 1}
+            else:
+                S[i] = {lab : 1}
 
-                if j in S:
-                    if l + lab in S[j]:
-                        S[j][l + lab] += 1
+            if j in S:
+                if l + lab in S[j]:
+                    S[j][l + lab] += 1
 
-                    else : 
-                        S[j][l + lab] = 1
+                else : 
+                    S[j][l + lab] = 1
 
-                else:
-                    S[j] = {l + lab : 1}
+            else:
+                S[j] = {l + lab : 1}
 
         S_ind = []
         S_val = []
@@ -598,8 +566,10 @@ class data_generator:
         sents = self.reader.read_sentences(batch_size)
         X_emb, X_POS, X_LEMMA, Lapl_i, Lapl_v, Sp_i, Sp_v, Pred_Ind, Arg_Pos , Seq_Len = self.model.creation_for_SRL(sents)
         ind = np.random.choice(np.arange(X_emb.shape[0]), size=batch_size, replace=False)
-        
+        #ind = np.arange(batch_size)
         return X_emb[ind], X_POS[ind], X_LEMMA[ind], Lapl_i[ind], Lapl_v[ind], Sp_i[ind], Sp_v[ind], Pred_Ind[ind], Arg_Pos[ind], Seq_Len[ind]
+    
+
     
     
     
@@ -658,10 +628,44 @@ class test_generator:
                                           )
         self.list_of_words = self.model.load_model("../../data/glove.6B.100d.txt")
         self.batch = 0
+        self.data = self.init()
+        self.counter_sent = 200
+
+    def init(self):
+        sents_new = self.reader.read_sentences(200)
+        return self.model.creation_for_test_srl(sents_new)
+        
+        
+    def new_data(self, batch_size):
+        sents_new = self.reader.read_sentences(batch_size)
+        to_ret = []
+        for D, D_n in zip(self.data, self.model.creation_for_test_srl(sents_new)):
+            D_ret = np.concatenate([D,D_n], axis=0)
+            to_ret.append(D_ret)
+
+        return to_ret
     
+    def give(self):
+        to_give = []
+        update = []
+        for D in self.data:
+            to_give.append(D[:self.batch])          
+            D_update = D[self.batch:]
+            update.append(D_update)
+        self.data = update
+        return to_give
+
     def __call__(self, batch_size):
         self.batch = batch_size
-        sents = self.reader.read_sentences(batch_size)
-        X_emb, X_POS, X_LEMMA, Lapl_i, Lapl_v, Sp_i,Sp_v, Pred_Ind, Seq_Len = self.model.creation_for_test_srl(sents)
         
-        return X_emb, X_POS, X_LEMMA, Lapl_i, Lapl_v, Sp_i, Sp_v, Pred_Ind, Seq_Len
+        if self.data[0].shape[0] >= batch_size:
+            X_emb, X_POS, X_LEMMA, Lapl_i, Lapl_v, Sp_i,Sp_v, Pred_Ind, Seq_Len = self.give()
+            
+        else:
+            self.data = self.new_data(batch_size)
+            self.counter_sent += batch_size
+            X_emb, X_POS, X_LEMMA, Lapl_i, Lapl_v, Sp_i,Sp_v, Pred_Ind, Seq_Len = self.give()
+        
+        
+        
+        return X_emb, X_POS, X_LEMMA, Lapl_i, Lapl_v, Sp_i,Sp_v, Pred_Ind, Seq_Len

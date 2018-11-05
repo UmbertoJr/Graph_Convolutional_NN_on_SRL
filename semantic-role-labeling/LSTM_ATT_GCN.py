@@ -9,9 +9,11 @@ from tensorflow.keras import backend as K
 #### hyper-parameters and parameters
 # general
 
-batch_size = 200
+batch_size = 300
 
 max_length_sentences = 144
+
+
 
 
 gen = data_generator("../../data/CoNLL2009-ST-English-train.txt", max_len_sent=max_length_sentences)
@@ -103,11 +105,8 @@ with G.as_default():
         with tf.name_scope("real_args"):
             real_srl_args_nice = tf.placeholder(tf.int32, shape=[batch_size, max_length_sentences])
             
-
-                
-            
-            
-
+    
+    
     ######## 2 layers of Bi-Lstm  ##############################
     with tf.name_scope("Bi-lstm"):
         
@@ -126,7 +125,8 @@ with G.as_default():
 
         with tf.name_scope("output_BiLSTM"):
             output_bi = tf.concat(outputs, 2)
-               
+
+                    
     
             
     ########### ATTENTION LAYER   ###################
@@ -151,10 +151,10 @@ with G.as_default():
         
         with tf.name_scope("weigths"):
             W_att_w = tf.Variable(tf.truncated_normal((dim_input_att,1)),  name="words-weigth")
-            W_att_pred = tf.Variable(tf.truncated_normal((dim_input_att,1)),  name="predicates-weigth")
+            #W_att_pred = tf.Variable(tf.truncated_normal((dim_input_att,1)),  name="predicates-weigth")
             
             B_pos_w = tf.Variable(tf.truncated_normal([max_length_sentences]), name="bias-on-position-words")
-            B_pos_pred = tf.Variable(tf.truncated_normal([max_length_sentences]), name="bias-on-position-predicate")
+            #B_pos_pred = tf.Variable(tf.truncated_normal([max_length_sentences]), name="bias-on-position-predicate")
 
         with tf.name_scope("Attention_vector"):
             intermediate_vec_words = tf.reshape( tf.squeeze(tf.tensordot(words_repeated_vec_nice, W_att_w, axes= 1 ),-1),
@@ -162,10 +162,10 @@ with G.as_default():
             vec_words_rapr = tf.tanh( intermediate_vec_words + B_pos_w ) 
             
             
-            intermediate_vec_pred = tf.reshape( tf.squeeze(tf.tensordot(pred_repeated_vec, W_att_pred, axes=  1),-1),
+            intermediate_vec_pred = tf.reshape( tf.squeeze(tf.tensordot(pred_repeated_vec, W_att_w, axes=  1),-1),
                                                [batch_size, max_length_sentences])
             
-            vec_preds_rapr = tf.tanh( intermediate_vec_pred + B_pos_pred)
+            vec_preds_rapr = tf.tanh( intermediate_vec_pred + B_pos_w)
 
         with tf.name_scope("similarity_and_alphas"):
             similarity = vec_words_rapr * vec_preds_rapr
@@ -250,9 +250,16 @@ with G.as_default():
 
         with tf.name_scope("loss_with_mask"):
             losses_detection_weigthted = tf.nn.weighted_cross_entropy_with_logits( targets=arg_detection ,
-                                                                                  logits=detection_srl_logit_nice, pos_weight = 1000)
+                                                                                  logits=detection_srl_logit_nice, pos_weight = 1.5)
             
-            losses_masked = tf.boolean_mask( losses_detection_weigthted,(real_srl_args_nice > 0))
+            
+            
+            
+            
+            
+            
+            
+            losses_masked = tf.boolean_mask( losses_detection_weigthted, mask_for_sequences)
             
             loss_detection = tf.reduce_mean(losses_masked)
 
@@ -293,7 +300,7 @@ with G.as_default():
         with tf.name_scope("loss_with_mask"):
             losses_srl = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=real_srl_args_nice, logits=preds_srl_logit_nice)
             with tf.name_scope("mask_on_len_and_num_preds"):
-                losses_after_mask_arg = tf.boolean_mask(losses_srl, (real_srl_args_nice > 0))   #mask only arguments positive
+                losses_after_mask_arg = tf.boolean_mask(losses_srl, mask_for_sequences)   #mask only arguments positive
                   
             loss_srl = tf.reduce_mean(losses_after_mask_arg)
   
@@ -391,7 +398,7 @@ with G.as_default():
 
 
 
-                for ite in range(0,batch_size//10):
+                for ite in range(0,batch_size//30):
                     _ = sess.run([train_op],feed_dict=feed_dict_train)
                     
                 
@@ -449,7 +456,7 @@ with G.as_default():
                     
                     
 
-                if h > 100 and  h%30==0: # devo sistemare il modo di fare prediction
+                if h > 150 and   h%30==0: # 
                     
                     
                     
@@ -479,29 +486,33 @@ with G.as_default():
 
                     ##### testverb predict numero sentence 399
                     ### da inserire ciclo for
-                    X_emb_test, X_POS_test, X_LEMMA_test, Lapl_i_test, Lapl_v_test, Sp_i_test, Sp_v_test, Pred_Ind_test, Seq_Len_test = gen_test(batch_size)
-                    ind = np.arange(batch_size)
-                    
-                    feed_dict_test={one_hot_POS: X_POS_test[ind].astype(np.float32),
-                                    embeddings: X_emb_test[ind],
-                                    lemma_idx : X_LEMMA_test[ind].astype(np.int32),
-                                    L_i : Lapl_i_test[ind],
-                                    L_v : Lapl_v_test[ind].astype(np.float32),
-                                    S_i : Sp_i_test[ind],
-                                    S_v : Sp_v_test[ind].astype(np.float32),
-                                    indices_for_predicate: Pred_Ind_test[ind],
-                                    sequence_lengths : Seq_Len_test[ind]        
-                                  }
-                    semantic_vec_test, detection = sess.run([predictions_srl, detection_srl_logit_nice],feed_dict=feed_dict_test)
+                    giro = 0
+                    while gen_test.counter_sent <= 400:
+                        
+                        X_emb_test, X_POS_test, X_LEMMA_test, Lapl_i_test, Lapl_v_test, Sp_i_test, Sp_v_test, Pred_Ind_test, Seq_Len_test = gen_test(batch_size)
+                        ind = np.arange(batch_size)
 
-                    np.save("../../data/semantic-role-labeling/Cud/srl_testverbs.npy", semantic_vec_test)
-                    np.save("../../data/semantic-role-labeling/Cud/detection_testverb.npy", detection)
+                        feed_dict_test={one_hot_POS: X_POS_test[ind].astype(np.float32),
+                                        embeddings: X_emb_test[ind],
+                                        lemma_idx : X_LEMMA_test[ind].astype(np.int32),
+                                        L_i : Lapl_i_test[ind],
+                                        L_v : Lapl_v_test[ind].astype(np.float32),
+                                        S_i : Sp_i_test[ind],
+                                        S_v : Sp_v_test[ind].astype(np.float32),
+                                        indices_for_predicate: Pred_Ind_test[ind],
+                                        sequence_lengths : Seq_Len_test[ind]        
+                                      }
+                        semantic_vec_test, detection = sess.run([predictions_srl, detection_srl_logit_nice],feed_dict=feed_dict_test)
+
+                        np.save("../../data/semantic-role-labeling/Cud/srl_testverbs"+str(giro)+".npy", semantic_vec_test)
+                        np.save("../../data/semantic-role-labeling/Cud/detection_testverb"+str(giro)+".npy", detection)
+                        giro += 1
+
+                        del X_emb_test, X_POS_test, X_LEMMA_test, Lapl_i_test, Lapl_v_test, Sp_i_test, Sp_v_test, Pred_Ind_test, Seq_Len_test
                     
-                    del X_emb_test, X_POS_test, X_LEMMA_test, Lapl_i_test, Lapl_v_test, Sp_i_test, Sp_v_test, Pred_Ind_test, Seq_Len_test
-                    
-                    ##### predict test data
-                    
-                    for it in range(4):
+                    ##### predict test data 
+                    it = 0
+                    while gen_test2.counter_sent <= 2001:
                         X_emb_test2, X_POS_test2, X_LEMMA_test2, Lapl_i_test2, Lapl_v_test2, Sp_i_test2,Sp_v_test2, Pred_Ind_test2, Seq_Len_test2= gen_test2(batch_size)
                         
                         
@@ -521,6 +532,7 @@ with G.as_default():
                         np.save("../../data/semantic-role-labeling/Cud/detection_"+str(it)+"_test.npy", detection2)
                         del X_emb_test2, X_POS_test2, X_LEMMA_test2, Lapl_i_test2, Lapl_v_test2, Sp_i_test2,Sp_v_test2
                         del Pred_Ind_test2, Seq_Len_test2
-                        print("####### test1 and test2 iteration : "+str(it)+" has been predicted ########")
+                        print("####### test2 iteration : "+str(it)+" has been predicted ########")
+                        it += 1
 
 print("TRAIN ENDED")
