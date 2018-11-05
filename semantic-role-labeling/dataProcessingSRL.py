@@ -211,10 +211,11 @@ class read_file:
                         dic[arg] = 1
         arg_pos = {}
         j = 0
-        arg_pos['unk'] = j
+        arg_pos['_'] = j
         for i in dic.keys():
-            j+= 1
-            arg_pos[i] = j
+            if i!="_" and i != "_\n":
+                j+= 1
+                arg_pos[i] = j
 
         return dic, arg_pos
     
@@ -285,7 +286,7 @@ class model_builder:
    
     def create_we_for(self, sent):
         #ritorna per ciascuna sentence un array dim (len_sentence + pad, dim_embeddings) 
-        # [len_sentence + pad = max_lenght(valore sccelto 50)]
+        # [len_sentence + pad = max_lenght(valore sccelto 70)]
         #   e un intero con valore la lunghezza della sentence "n"
         n = len(sent)
         w=0
@@ -301,62 +302,11 @@ class model_builder:
         sent_x = np.pad(np.array(Sent, dtype = np.float32),((0,self.max_length-n),(0,0)), "constant", constant_values = 0 )
         return (sent_x ,  n)
                 
-    def creation(self, sents, max_length = ""):
-        ## ritorna per un batch di sentence un array dim [batch, max_length, dim_embeddings]
-        # e un array dim [batch] con la lunghezza di ciascuna sentence
-        if max_length != "":
-            self.max_length = max_length
-        ## input glove embedding
-        X = []
-        ## len of each sequence
-        seq_len = []
-        ## POS and lemma one hot
-        POS = []
-        LEMMA = []
-        #### inputs for Predicate Disambiguation
-        # predicate detection
-        P = []
-        # predicate disambiguation
-        P_pos = []
-        #
-        Lapl_ind = []
-        Lapl_val = []
-        S_ind = []
-        S_val = []
-        ### input placeholder for SRL
-        
-        for sent in sents:
-            if len(sent) > self.max_length:
-                r = (len(sent))%20
-                if r != 0:
-                    sent += [['_' for _ in range(len(sent[0]))] for _ in range(20-r)]                          
-                sents_after_conv_win = [sent[20*i: 20*i+self.max_length] for i in range(len(sent)//20)]        
-                
-                for s in sents_after_conv_win:
-                    x, n = self.create_we_for(s)
-                    p, p_pos = self.is_pred(s)
-                    pos = self.pos_arg(s)
-                    lem = self.lemma_arg(s)
-                    l_i, l_v, s_i, s_v = self.laplacian_and_S(s)
-                    X.append(x), seq_len.append(n), P.append(p), P_pos.append(p_pos), POS.append(pos), LEMMA.append(lem)
-                    Lapl_ind.append(l_i), Lapl_val.append(l_v), S_ind.append(s_i), S_val.append(s_v)
-
-            else:
-                x, n = self.create_we_for(sent)
-                p, p_pos = self.is_pred(sent)
-                pos = self.pos_arg(sent)
-                lem = self.lemma_arg(sent)
-                l_i, l_v, s_i, s_v = self.laplacian_and_S(sent)
-                X.append(x), seq_len.append(n), P.append(p), P_pos.append(p_pos), POS.append(pos), LEMMA.append(lem)
-                Lapl_ind.append(l_i), Lapl_val.append(l_v), S_ind.append(s_i), S_val.append(s_v)
-        
-        
-        return np.array(X), np.array(seq_len), np.array(P), np.array(P_pos), np.array(POS), np.array(LEMMA), np.array(Lapl_ind), np.array(Lapl_val), np.array(S_ind), np.array(S_val)
     
     
     def creation_for_SRL(self, sents, max_length = ""):
         ## ritorna per un batch di sentence un array dim [batch, max_length, dim_embeddings]
-        # e un array dim [batch] con la lunghezza di ciascuna sentence
+        # e un array dim [batch] con la lunghezza len_max di ciascuna sentence
         if max_length != "":
             self.max_length = max_length
         ## input glove embedding
@@ -368,47 +318,52 @@ class model_builder:
         LEMMA = []
   
         # graph convolutional inputs
-        Lapl_ind = []
-        Lapl_val = []
-        S_ind = []
-        S_val = []
+        Lapl_ind, Lapl_val = [], []
+        S_ind, S_val = [], []
         
         ## SRL input and count
-        PRED_IND, PRED_count = self.position_predicate_indices(sents)
+        PRED_IND = []
         ARG_POS = []
-        #s_count = 0
+        
         for sent in sents:
+            
             if len(sent) > self.max_length:
-                sents_after_conv_win = [sent[0:self.max_length]]  
+                sents_after_split = self.split_the_sentence(sent)
                 
-                for s in sents_after_conv_win:
-                    x, n = self.create_we_for(s)
-                    pos = self.pos_arg(s)
-                    lem = self.lemma_arg(s)
-                    l_i, l_v, s_i, s_v = self.laplacian_and_S(s)
-                    arg_pos = self.position_argument_vec(s)
-                    X.append(x), seq_len.append(n), POS.append(pos), LEMMA.append(lem)
-                    Lapl_ind.append(l_i), Lapl_val.append(l_v), S_ind.append(s_i), S_val.append(s_v), ARG_POS.append(arg_pos)
+                for s in sents_after_split:
+                    pred_ind, pred_count = self.position_predicate_indices(s)
+                    for pred_num in range(pred_count):
+                        x, n = self.create_we_for(s)
+                        pos, lem = self.pos_lemma_one_hot(s)
+                        arg_pos = self.position_argument_vec(pred_num, s)
+                        l_i, l_v, s_i, s_v = self.laplacian_and_S(s)
+                        X.append(x), seq_len.append(n), POS.append(pos), LEMMA.append(lem)
+                        Lapl_ind.append(l_i), Lapl_val.append(l_v), S_ind.append(s_i), S_val.append(s_v)
+                        ARG_POS.append(arg_pos)
+                    PRED_IND.extend(pred_ind)
 
             else:
-                x, n = self.create_we_for(sent)
-                pos = self.pos_arg(sent)
-                lem = self.lemma_arg(sent)
-                l_i, l_v, s_i, s_v = self.laplacian_and_S(sent)
-                arg_pos = self.position_argument_vec(sent)
-                X.append(x), seq_len.append(n), POS.append(pos), LEMMA.append(lem)
-                Lapl_ind.append(l_i), Lapl_val.append(l_v), S_ind.append(s_i), S_val.append(s_v), ARG_POS.append(arg_pos)
-            
-            #s_count += 1 
-           
+                pred_ind, pred_count = self.position_predicate_indices(sent)
+                for pred_num in range(pred_count):
+                    x, n = self.create_we_for(sent)
+                    pos, lem = self.pos_lemma_one_hot(sent)
+                    arg_pos = self.position_argument_vec(pred_num, sent)
+                    l_i, l_v, s_i, s_v = self.laplacian_and_S(sent)
+                    
+                    X.append(x), seq_len.append(n), POS.append(pos), LEMMA.append(lem)
+                    Lapl_ind.append(l_i), Lapl_val.append(l_v), S_ind.append(s_i), S_val.append(s_v)
+                    ARG_POS.append(arg_pos)
+                PRED_IND.extend(pred_ind)
         
-        return np.array(X), np.array(POS), np.array(LEMMA), np.array(Lapl_ind), np.array(Lapl_val), np.array(S_ind), np.array(S_val), PRED_IND, np.array(ARG_POS), np.array(seq_len), np.array(PRED_count)
+        return np.array(X), np.array(POS), np.array(LEMMA), np.array(Lapl_ind), np.array(Lapl_val), np.array(S_ind), np.array(S_val), np.array(PRED_IND), np.array(ARG_POS), np.array(seq_len)
+    
     
     def creation_for_test_srl(self, sents, max_length = ""):
         ## ritorna per un batch di sentence un array dim [batch, max_length, dim_embeddings]
         # e un array dim [batch] con la lunghezza di ciascuna sentence
         if max_length != "":
             self.max_length = max_length
+            
         X = []
         seq_len = []
         POS = []
@@ -418,122 +373,129 @@ class model_builder:
         S_ind = []
         S_val = []
         ## SRL input and count
-        PRED_IND, PRED_count = self.position_predicate_indices(sents)
+        PRED_IND, PRED_count = [], []
+        
         for sent in sents:
             if len(sent) > self.max_length:
-                sents_after_conv_win = [sent[0:self.max_length]]        
+                sents_after_split = self.split_the_sentence(sent)
 
-                for s in sents_after_conv_win:
-                    x, n = self.create_we_for(s)
-                    pos = self.pos_arg(s)
-                    lem = self.lemma_arg(s)
-                    l_i, l_v, s_i, s_v = self.laplacian_and_S(s)
-                    X.append(x), seq_len.append(n),POS.append(pos), LEMMA.append(lem)
-                    Lapl_ind.append(l_i), Lapl_val.append(l_v), S_ind.append(s_i), S_val.append(s_v)
+                for s in sents_after_split:
+                    pred_ind, pred_count = self.position_predicate_indices(s)
+                    for pred_num in range(pred_count):
+                        x, n = self.create_we_for(s)
+                        pos, lem = self.pos_lemma_one_hot(s)
+                        l_i, l_v, s_i, s_v = self.laplacian_and_S(s)
+                        X.append(x), seq_len.append(n),POS.append(pos), LEMMA.append(lem)
+                        Lapl_ind.append(l_i), Lapl_val.append(l_v), S_ind.append(s_i), S_val.append(s_v)
+                    
+                    PRED_IND.extend(pred_ind)
 
             else:
-                x, n = self.create_we_for(sent)
-                pos = self.pos_arg(sent)
-                lem = self.lemma_arg(sent)
-                l_i, l_v, s_i, s_v = self.laplacian_and_S(sent)
-                X.append(x), seq_len.append(n), POS.append(pos), LEMMA.append(lem)
-                Lapl_ind.append(l_i), Lapl_val.append(l_v), S_ind.append(s_i), S_val.append(s_v)
+                pred_ind, pred_count = self.position_predicate_indices(sent)
+                for pred_num in range(pred_count):
+                    x, n = self.create_we_for(sent)
+                    pos, lem = self.pos_lemma_one_hot(sent)
+                    l_i, l_v, s_i, s_v = self.laplacian_and_S(sent)
+                    X.append(x), seq_len.append(n), POS.append(pos), LEMMA.append(lem)
+                    Lapl_ind.append(l_i), Lapl_val.append(l_v), S_ind.append(s_i), S_val.append(s_v)
+                
+                PRED_IND.extend(pred_ind)
 
-        return np.array(X), np.array(POS), np.array(LEMMA), np.array(Lapl_ind), np.array(Lapl_val), np.array(S_ind), np.array(S_val), PRED_IND, seq_len, PRED_count
+        return np.array(X), np.array(POS), np.array(LEMMA), np.array(Lapl_ind), np.array(Lapl_val), np.array(S_ind), np.array(S_val), np.array(PRED_IND), np.array(seq_len)
+    
+    
+    def change_indices(self, sent):
+        #### this function just change the indices of inputs
+        first_index = int(sent[0][0])
+        new_sent = []
+        for w in sent:
+            new_w = []
+            for i in w:
+                new_w.append(i)
+            new_w[0] = str( int(w[0]) - first_index )
+            if new_w[8].isdigit():
+                head = int(new_w[8]) - first_index 
+                if head >= 0 and head < self.max_length:
+                    new_w[8] = str(head)
+                else:
+                    new_w[8] = "_"
+            new_sent.append(new_w)
+        return new_sent
+    
+    
+    def split_the_sentence(self, sent):
+        ind_pred_med, n = 0, len(sent)
+        distance = n
+        max_len = self.max_length
+        one = sent[:max_len]
+        three = self.change_indices(sent[(n - max_len):])
+        if n - max_len <= 20:
+            return [one, three]
+        else:
+            for w in sent:
+                if w[2]=="," or w[2]=="." or w[2]==";" or w[2]=="!" or w[2]=="?":
+                    ind = int(w[0])-1
+                    if ind < 40:
+                        if abs(ind - n//5) < distance:
+                            ind_pred_med = ind
+                            distance = abs(ind - n//5)
+
+            two = self.change_indices(sent[ind_pred_med : ind_pred_med+ max_len])
+
+            return [one, two, three]
 
     
-    def position_predicate_indices(self, sents):
+    def position_predicate_indices(self, sent):
         sent_pos_pred = []
-        sents_pos = []
-        s_pos = 0
-        num_of_pred = self.max_num_of_pred
-        count_pred = []
-        for sent in sents:
-            w_pos = 0
-            for w in sent:
-                if w[12]=="Y":
-                    sent_pos_pred.append([s_pos, w_pos])
-                w_pos += 1
-            s_pos += 1
-            n = len(sent_pos_pred)
-            if n != 0:
-                sent_pos_pred.extend([[sent_pos_pred[-1][0],sent_pos_pred[-1][1]] for _ in range(num_of_pred - n)])
-                sents_pos.extend(sent_pos_pred)
-                count_pred.append(n)
-                sent_pos_pred = []
-            else:
-                sent_pos_pred = [[s_pos-1,0] for _ in range(num_of_pred)]
-                sents_pos.extend(sent_pos_pred)
-                count_pred.append(n)
-                sent_pos_pred = []
-        return np.array(sents_pos), np.array(count_pred)
+        w_pos = 0
+        for w in sent:
+            if w[12]=="Y":
+                sent_pos_pred.append([ w_pos ])
+            w_pos += 1
+        n = len(sent_pos_pred)
+        return sent_pos_pred, n
         
     
-    def position_argument_vec(self, sent):
-        pred = 0
-        arg_in_sent = [0 for _ in range(self.max_length*self.max_num_of_pred)]
-        #arg_indices = []
-        for i in range(14,len(sent[0])):
-            w_pos = 0
-            for w in sent:
-                if w[i]!="_" and w[i]!="_\n":
-                    if w[i].strip() in self.arg_pos:
-                        arg_in_sent[w_pos+ pred*self.max_length] = self.arg_pos[w[i].strip()]
-                    else:
-                        arg_in_sent[w_pos+ pred*self.max_length] = self.arg_pos["unk"]
-                    #arg_indices.append(w_pos+ pred*self.max_length)
-                w_pos += 1
-            pred += 1
-
-        return np.array(arg_in_sent) #, arg_indices
-
-    
-    def num_of_pred(self, sent):
-        ## simple function that returns the numbers of predicate in a sentence
-        j=0
+    def position_argument_vec(self, pred_num, sent):
+        arg_in_sent = np.zeros( (self.max_length)  )
+        pos_in_the_list = 14 + pred_num
+        w_pos = 0
         for w in sent:
-            if w[13]!="_":
-                j+=1
-        return j
-    
-    def is_pred(self, sent):
-        n = len(sent)
-        bool_pred = [0 for _ in range(self.max_length)]
-        which_pred = [ 0 for _ in range(self.max_length)]
-        for w in range(n):
-            if sent[w][13]!= '_':
-                bool_pred[w] = 1
-                if sent[w][13] in self.pred_pos:
-                    which_pred[w] = self.pred_pos[sent[w][13]]
+            arg = w[pos_in_the_list].split()[0]
+            if arg!="_" and arg!="_\n":
+                if arg in self.arg_pos:
+                    arg_in_sent[w_pos] = self.arg_pos[arg]
                 else:
-                    which_pred[w] = self.pred_pos['unk']
-        one_hot_pred = np.zeros((self.max_length, 2 ))
-        one_hot_pred[np.arange(self.max_length), bool_pred] = 1
-        return one_hot_pred, which_pred
+                    print("problem with ", arg)
+                    arg_in_sent[ w_pos] = 0
+            w_pos += 1
+
+        return arg_in_sent
+
     
-    def pos_arg(self, sent):
+    
+    def pos_lemma_one_hot(self, sent):
         vec_pos = []
-        p = 0
-        for w in sent:
-            if w[4]!='_':
-                vec_pos.append(self.pos_pos[w[4]])
-            else:
-                p += 1
-        one_hot_pos = np.zeros((self.max_length, self.len_pos ))
-        one_hot_pos[np.arange(len(sent)-p), vec_pos] = 1
-        return one_hot_pos
-            
-    def lemma_arg(self, sent):
+        sent_pos = []
         vec_lemma = []
-        p = 0
-        for w in sent:
-            if w[2] in self.lemma_pos:
-                vec_lemma.append(self.lemma_pos[w[2]])
+        n = len(sent)
+        for w in range(n):
+            if sent[w][4]!='_':
+                vec_pos.append(self.pos_pos[sent[w][4]])
+                sent_pos.append(w)
+            if sent[w][2] in self.lemma_pos:
+                vec_lemma.append(self.lemma_pos[sent[w][2]])
             else:
-                vec_lemma.append(self.lemma_pos["unk"])
-                                 
-        return np.pad(np.array(vec_lemma), (0, self.max_length - len(sent)), "constant")
+                vec_lemma.append(0)
+                
+        one_hot_pos = np.zeros((self.max_length, self.len_pos ))
+        one_hot_pos[ sent_pos , vec_pos] = 1
+        one_hot_lemma = np.pad(np.array(vec_lemma), (0, self.max_length - len(sent)), "constant")
+        return one_hot_pos, one_hot_lemma
+    
+
    
+
     def laplacian_and_S(self, sent):
         # this fun create the Laplacian matrix and the sparse matrix S
         ## both are saved as a list of indexes and value for sparse rapresentation
@@ -593,9 +555,8 @@ class model_builder:
             for i in L[k]:
                 Lapl_ind.append([k,i])
                 Lapl_val.append(1)
-        Lapl_ind.extend([[0,0] for _ in range(self.max_length - len(Lapl_ind))])  ### sostituire max len qui
+        Lapl_ind.extend([[0,0] for _ in range(self.max_length - len(Lapl_ind))])  
         Lapl_val.extend([0 for _ in range(self.max_length - len(Lapl_val))])
-
 
         return Lapl_ind, Lapl_val, S_ind , S_val
 
@@ -610,16 +571,16 @@ class data_generator:
         self.file = file
         self.reader = read_file(self.file)
         self.pos_pos = self.reader.find_all_POS()[1]
-        pickle.dump(self.pos_pos, open("../../data/semantic-role-labeling/part_of_speech.pickle","wb"), protocol=pickle.HIGHEST_PROTOCOL)
+        pickle.dump(self.pos_pos, open("../../data/semantic-role-labeling/Cud/part_of_speech.pickle","wb"), protocol=pickle.HIGHEST_PROTOCOL)
         self.lemma_pos = self.reader.find_all_lemmas()[1]
-        pickle.dump(self.lemma_pos, open("../../data/semantic-role-labeling/lemma.pickle","wb"), protocol=pickle.HIGHEST_PROTOCOL)
+        pickle.dump(self.lemma_pos, open("../../data/semantic-role-labeling/Cud/lemma.pickle","wb"), protocol=pickle.HIGHEST_PROTOCOL)
         self.dep_rel_pos = self.reader.find_all_dependency_relations()[1]
-        pickle.dump(self.dep_rel_pos, open("../../data/semantic-role-labeling/dependecy_relation.pickle","wb"), protocol=pickle.HIGHEST_PROTOCOL)
+        pickle.dump(self.dep_rel_pos, open("../../data/semantic-role-labeling/Cud/dependecy_relation.pickle","wb"), protocol=pickle.HIGHEST_PROTOCOL)
         self.max_length = max_len_sent
         self.pred_pos = self.reader.find_all_predicates(0)[0]
-        pickle.dump(self.pred_pos, open("../../data/semantic-role-labeling/predicate.pickle","wb"), protocol=pickle.HIGHEST_PROTOCOL)
+        pickle.dump(self.pred_pos, open("../../data/semantic-role-labeling/Cud/predicate.pickle","wb"), protocol=pickle.HIGHEST_PROTOCOL)
         self.arg_pos = self.reader.find_all_args()[1]
-        pickle.dump(self.pred_pos, open("../../data/semantic-role-labeling/arguments.pickle","wb"), protocol=pickle.HIGHEST_PROTOCOL)
+        pickle.dump(self.arg_pos, open("../../data/semantic-role-labeling/Cud/arguments.pickle","wb"), protocol=pickle.HIGHEST_PROTOCOL)
         self.max_num_of_pred = self.reader.max_pred_in_sentence()
         self.model = model = model_builder(self.pos_pos, 
                                            self.lemma_pos,
@@ -635,9 +596,12 @@ class data_generator:
     def __call__(self, batch_size):
         self.batch = batch_size
         sents = self.reader.read_sentences(batch_size)
-        X_emb, X_POS, X_LEMMA, Lapl_i, Lapl_v, Sp_i,Sp_v, Pred_Ind, Arg_Pos , Seq_Len, Pred_count= self.model.creation_for_SRL(sents)
-        ind = np.arange(batch_size)
-        return X_emb[ind], X_POS[ind], X_LEMMA[ind], Lapl_i[ind], Lapl_v[ind], Sp_i[ind], Sp_v[ind], Pred_Ind, Arg_Pos[ind], Seq_Len[ind], Pred_count[ind]
+        X_emb, X_POS, X_LEMMA, Lapl_i, Lapl_v, Sp_i, Sp_v, Pred_Ind, Arg_Pos , Seq_Len = self.model.creation_for_SRL(sents)
+        ind = np.random.choice(np.arange(X_emb.shape[0]), size=batch_size, replace=False)
+        
+        return X_emb[ind], X_POS[ind], X_LEMMA[ind], Lapl_i[ind], Lapl_v[ind], Sp_i[ind], Sp_v[ind], Pred_Ind[ind], Arg_Pos[ind], Seq_Len[ind]
+    
+    
     
     
     
@@ -646,12 +610,12 @@ class evaluation_generator:
     def __init__(self, file, max_len_sent, max_num_of_pred):
         self.file = file
         self.reader = read_file(self.file)
-        self.pos_pos = pickle.load(open("../../data/semantic-role-labeling/part_of_speech.pickle","rb"))
-        self.lemma_pos = pickle.load(open("../../data/semantic-role-labeling/lemma.pickle","rb"))
-        self.dep_rel_pos = pickle.load(open("../../data/semantic-role-labeling/dependecy_relation.pickle","rb"))
+        self.pos_pos = pickle.load(open("../../data/semantic-role-labeling/Cud/part_of_speech.pickle","rb"))
+        self.lemma_pos = pickle.load(open("../../data/semantic-role-labeling/Cud/lemma.pickle","rb"))
+        self.dep_rel_pos = pickle.load(open("../../data/semantic-role-labeling/Cud/dependecy_relation.pickle","rb"))
         self.max_length = max_len_sent
-        self.pred_pos = pickle.load(open("../../data/semantic-role-labeling/predicate.pickle","rb"))
-        self.arg_pos = pickle.load(open("../../data/semantic-role-labeling/arguments.pickle","rb"))
+        self.pred_pos = pickle.load(open("../../data/semantic-role-labeling/Cud/predicate.pickle","rb"))
+        self.arg_pos = pickle.load(open("../../data/semantic-role-labeling/Cud/arguments.pickle","rb"))
         self.max_num_of_pred = max_num_of_pred
         self.model = model = model_builder(self.pos_pos, 
                                            self.lemma_pos,
@@ -667,9 +631,10 @@ class evaluation_generator:
     def __call__(self, batch_size):
         self.batch = batch_size
         sents = self.reader.read_sentences(batch_size)
-        X_emb, X_POS, X_LEMMA, Lapl_i, Lapl_v, Sp_i,Sp_v, Pred_Ind, Arg_Pos, Seq_Len, Pred_count = self.model.creation_for_SRL(sents)
-        ind = np.arange(batch_size)
-        return X_emb[ind], X_POS[ind], X_LEMMA[ind], Lapl_i[ind], Lapl_v[ind], Sp_i[ind], Sp_v[ind], Pred_Ind, Arg_Pos[ind], Seq_Len[ind], Pred_count[ind]
+        X_emb, X_POS, X_LEMMA, Lapl_i, Lapl_v, Sp_i, Sp_v, Pred_Ind, Arg_Pos, Seq_Len = self.model.creation_for_SRL(sents)
+        ind = np.random.choice(np.arange(X_emb.shape[0]), size=batch_size, replace=False)
+           
+        return X_emb[ind], X_POS[ind], X_LEMMA[ind], Lapl_i[ind], Lapl_v[ind], Sp_i[ind], Sp_v[ind], Pred_Ind[ind], Arg_Pos[ind], Seq_Len[ind]
     
     
     
@@ -677,12 +642,12 @@ class test_generator:
     def __init__(self, file, max_len_sent):
         self.file = file
         self.reader = read_file(self.file)
-        self.pos_pos = pickle.load(open("../../data/semantic-role-labeling/part_of_speech.pickle","rb"))
-        self.lemma_pos = pickle.load(open("../../data/semantic-role-labeling/lemma.pickle","rb"))
-        self.dep_rel_pos = pickle.load(open("../../data/semantic-role-labeling/dependecy_relation.pickle","rb"))
+        self.pos_pos = pickle.load(open("../../data/semantic-role-labeling/Cud/part_of_speech.pickle","rb"))
+        self.lemma_pos = pickle.load(open("../../data/semantic-role-labeling/Cud/lemma.pickle","rb"))
+        self.dep_rel_pos = pickle.load(open("../../data/semantic-role-labeling/Cud/dependecy_relation.pickle","rb"))
         self.max_length = max_len_sent
-        self.pred_pos = pickle.load(open("../../data/semantic-role-labeling/predicate.pickle","rb"))
-        self.arg_pos = pickle.load(open("../../data/semantic-role-labeling/arguments.pickle","rb"))
+        self.pred_pos = pickle.load(open("../../data/semantic-role-labeling/Cud/predicate.pickle","rb"))
+        self.arg_pos = pickle.load(open("../../data/semantic-role-labeling/Cud/arguments.pickle","rb"))
         self.model = model = model_builder(self.pos_pos, 
                                            self.lemma_pos,
                                            self.dep_rel_pos,
@@ -697,6 +662,6 @@ class test_generator:
     def __call__(self, batch_size):
         self.batch = batch_size
         sents = self.reader.read_sentences(batch_size)
-        X_emb, X_POS, X_LEMMA, Lapl_i, Lapl_v, Sp_i,Sp_v, Pred_Ind, Seq_Len, Pred_count = self.model.creation_for_test_srl(sents)
-        ind = np.arange(batch_size)
-        return X_emb[ind], X_POS[ind], X_LEMMA[ind], Lapl_i[ind], Lapl_v[ind], Sp_i[ind], Sp_v[ind], Pred_Ind, Seq_Len, Pred_count
+        X_emb, X_POS, X_LEMMA, Lapl_i, Lapl_v, Sp_i,Sp_v, Pred_Ind, Seq_Len = self.model.creation_for_test_srl(sents)
+        
+        return X_emb, X_POS, X_LEMMA, Lapl_i, Lapl_v, Sp_i, Sp_v, Pred_Ind, Seq_Len
